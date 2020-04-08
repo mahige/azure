@@ -1,0 +1,240 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "existingVNETName": {
+      "type": "string",
+      "defaultValue": "RDS2016-RG-vnet",
+      "metadata": {
+        "description": "Existing VNET that contains the domain controller"
+      }
+    },
+    "existingSubnetName": {
+      "defaultValue": "default",
+      "type": "string",
+      "metadata": {
+        "description": "Existing subnet that contains the domain controller"
+      }
+    },
+    "vmName": {
+      "type": "string",
+      "metadata": {
+        "description": "Unique public DNS prefix for the deployment. The fqdn will look something like '<dnsname>.westus.cloudapp.azure.com'. Up to 62 chars, digits or dashes, lowercase, should start with a letter: must conform to '^[a-z][a-z0-9-]{1,61}[a-z0-9]$'."
+      }
+    },
+    "vmSize": {
+      "type": "string",
+      "defaultValue": "Standard_B2ms",
+      "metadata": {
+        "description": "The size of the virtual machines"
+      }
+    },
+    "modulesUrl": {
+        "type": "String",
+        "defaultValue": "https://hogehoge.blob.core.windows.net/windows-powershell-dsc/RDSHaddConfiguration.zip"
+    },
+    "configurationFunction": {
+        "type": "String",
+        "defaultValue": "RDSTest0_mahigecustom.ps1\\RDSTest0"
+    },
+    "vmAdminUsername": {
+      "type": "string",
+      "metadata": {
+        "description": "The name of the administrator of the new VM and the domain. Exclusion list: 'admin','administrator"
+      }
+    },
+    "vmAdminPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "The password for the administrator account of the new VM and the domain"
+      }
+    },
+    "domainName": {
+      "defaultValue": "mahigerds.com",
+      "type": "string"
+    },
+    "domainUsername": {
+      "defaultValue": "mahigerds.com\\mahige",
+      "type": "string"
+    },
+    "domainPassword": {
+      "type": "securestring"
+    },
+    "collectionName": {
+      "defaultValue": "Collection-Version1.1",
+      "type": "string"
+    },
+    "availabilityZone": {
+      "allowedValues": [							
+        "1",							
+        "2",
+        "3"							
+      ],
+      "type": "string",
+      "defaultValue": "1"
+    },
+    "diagnosticsStorageAccountName": {
+      "type": "string",
+      "defaultValue": "4bootdiag"
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Location for all resources."
+      }
+    }
+  },
+  "variables": {
+    "imagePublisher": "MicrosoftWindowsServer",
+    "imageOffer": "WindowsServer",
+    "windowsOSVersion": "2016-Datacenter",
+    "nicName": "[concat(parameters('vmName'),'Nic')]",
+    "publicIPName": "[concat(parameters('vmName'),'Pip')]",
+    "subnetId": "[resourceId(resourceGroup().name, 'Microsoft.Network/virtualNetworks/subnets', parameters('existingVNETName'), parameters('existingSubnetName'))]"
+  },
+  "resources": [
+    {
+      "apiVersion": "2019-09-01",
+      "type": "Microsoft.Network/publicIPAddresses",
+      "name": "[variables('publicIPName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "Standard"
+      },
+      "zones": [
+          "[parameters('availabilityZone')]"
+      ],
+      "properties": {
+        "publicIPAllocationMethod": "Static",
+        "dnsSettings": {
+          "domainNameLabel": "[parameters('vmName')]"
+        }
+      }
+    },
+    {
+      "apiVersion": "2019-09-01",
+      "type": "Microsoft.Network/networkInterfaces",
+      "name": "[variables('nicName')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[concat('Microsoft.Network/publicIPAddresses/', variables('publicIPName'))]"
+      ],
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('publicIPName'))]"
+              },
+              "subnet": {
+                "id": "[variables('subnetId')]"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "2019-07-01",
+      "type": "Microsoft.Compute/virtualMachines",
+      "name": "[parameters('vmName')]",
+      "zones": [
+          "[parameters('availabilityZone')]"
+      ],
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"
+      ],
+      "properties": {
+        "hardwareProfile": {
+          "vmSize": "[parameters('vmSize')]"
+        },
+        "osProfile": {
+          "computerName": "[parameters('vmName')]",
+          "adminUsername": "[parameters('vmAdminUsername')]",
+          "adminPassword": "[parameters('vmAdminPassword')]",
+          "windowsConfiguration": {
+              "enableAutomaticUpdates": false,
+              "timeZone": "Tokyo Standard Time"
+          }
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "[variables('imagePublisher')]",
+            "offer": "[variables('imageOffer')]",
+            "sku": "[variables('windowsOSVersion')]",
+            "version": "latest"
+          },
+          "osDisk": {
+            "name": "[concat(parameters('vmName'),'_OsDisk')]",
+            "caching": "ReadWrite",
+            "createOption": "FromImage"
+          }
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"
+            }
+          ]
+        },
+        "diagnosticsProfile": {
+          "bootDiagnostics": {
+            "enabled": true,
+            "storageUri": "[concat('https://', parameters('diagnosticsStorageAccountName'), '.blob.core.windows.net/')]"
+          }
+        }
+      }
+    },
+    {
+    "type": "Microsoft.Compute/virtualMachines/extensions",
+    "apiVersion": "2019-07-01",
+    "name": "[concat(parameters('vmName'),'/Microsoft.Powershell.DSC')]", 
+    "location": "[parameters('location')]",
+    "dependsOn": [
+      "[parameters('vmName')]"
+    ],
+    "properties": {
+      "publisher": "Microsoft.Powershell",
+      "type": "DSC",
+      "typeHandlerVersion": "2.77",
+      "autoUpgradeMinorVersion": "false",
+      "settings": {
+        "ModulesUrl": "[parameters('modulesUrl')]",
+        "ConfigurationFunction": "[parameters('configurationFunction')]",
+        "Properties": {
+          "domainCredential":{
+            "UserName" : "[parameters('domainUsername')]",
+            "Password" : "PrivateSettingsRef:PSPassword"
+          },
+          "adminCredential":{
+            "UserName" : "[parameters('vmAdminUsername')]",
+            "Password" : "PrivateSettingsRef:AdminPassword"
+          },
+          "domainName": "[parameters('domainName')]",
+          "vmname":"[parameters('vmName')]",
+          "collectionName":"[parameters('collectionName')]"
+        },
+        "WmfVersion": "latest",
+        "Privacy": {
+          "DataCollection": "Enable"
+          },
+        "ActionAfterReboot": "ContinueConfiguration",
+        "RebootNodeIfNeeded": true,
+        "ConfigurationMode": "ApplyOnly",
+        "ConfigurationModeFrequencyMins": 30,
+        "RefreshFrequencyMins": 30  
+      },
+        "protectedSettings": {
+          "Items": {
+            "PSPassword": "[parameters('domainPassword')]",
+            "AdminPassword": "[parameters('vmAdminPassword')]"
+          }
+        }
+      }
+    }       
+  ]
+}
